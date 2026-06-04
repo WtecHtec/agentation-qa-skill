@@ -1,10 +1,8 @@
 ---
 name: agentation-qa-skill
 description: >
-  QA 提测工作流 MCP Server。当用户说"进入提测"时使用此 skill，让 Claude Code 进入
-  「等待测试反馈 bug → 精准定位代码 → 自动修复 → 循环」模式。
-  配合 agentation-zero (https://github.com/WtecHtec/agentation-zero) 使用，
-  agentation-zero 负责页面标注采集，agentation-qa-skill 负责接收数据并驱动 Claude Code 修复。
+  QA 提测工作流。当用户说"进入提测"时使用此 skill。
+  必须连接 MCP server「agentation-qa-mcp-server」并调用其工具驱动修复循环。
 version: 1.0.0
 ---
 
@@ -12,27 +10,39 @@ version: 1.0.0
 
 ## 触发条件
 
-用户说 **"进入提测"** → 立即进入 bug 修复循环，无需额外确认。
+用户说 **"进入提测"** → 连接 `agentation-qa-mcp-server`，立即进入 bug 修复循环。
+
+---
+
+## MCP Server
+
+**server 名称**：`agentation-qa-mcp-server`
+**启动命令**：`.mcp.json` 中已配置，Claude Code 自动拉起，入口为 `src/mcp.js`
+
+可用工具：
+
+| 工具名 | 说明 |
+|--------|------|
+| `wait_for_bug_report` | 阻塞等待新 bug，有数据时自动返回 |
+| `complete_bug` | 标记修复完成，传入完整 bug 对象 + fixSummary |
+| `get_queue_status` | 查询队列数量，仅结束时调用 |
 
 ---
 
 ## 工作循环
 
-每一轮只做四件事，做完立刻进入下一轮，不输出多余内容：
+**必须用 `agentation-qa-mcp-server` 的工具执行以下循环，循环不能自行中断：**
 
 ```
-① wait_for_bug_report        ← 阻塞等待，调用后什么都不做
-② 读取 sourceLocation 定位 → 按 description 修复
-③ complete_bug(bug, fixSummary)
-④ 回到 ①
+loop:
+  ① 调用 wait_for_bug_report          → 阻塞，等待返回
+  ② 读取返回的 bug，按修复规范处理
+  ③ 调用 complete_bug(bug, fixSummary) → 归档
+  ④ 输出一行：✓ fixed: 文件路径:行号 — 改了什么
+  ⑤ 立即回到 ①，不等待用户指令，不做任何其他操作
 ```
 
-**每轮结束只输出一行**，格式：
-```
-✓ fixed: <文件路径:行号> — <改了什么>
-```
-
-示例：`✓ fixed: src/pages/hotel/list/index.tsx:226 — 「重置」改为「清空」`
+**⚠️ 第⑤步是关键：修复完成后必须立即调用 `wait_for_bug_report` 进入下一轮，不能停下来等待用户输入，不能退出循环。**
 
 ---
 
@@ -40,11 +50,11 @@ version: 1.0.0
 
 | 禁止 | 原因 |
 |------|------|
-| 使用 `Monitor` 工具 | `wait_for_bug_report` 已是阻塞挂起，数据到来自动返回，无需监控 |
-| 轮询 `/api/pending` 或 `/api/status` | 同上，不要用循环 + 延时检查 |
-| 修复完后调用 `get_queue_status` | 不需要，直接进入下一轮 |
-| 多行汇报修复详情 | 一行 `✓ fixed:` 足够，保持 token 最小消耗 |
-| 询问用户是否继续 | 默认持续循环，直到用户说"结束提测" |
+| 修复完后停止循环或等待用户输入 | 必须立即进入下一轮 wait_for_bug_report |
+| 使用 `Monitor` 工具 | wait_for_bug_report 本身是阻塞挂起，无需额外监控 |
+| 轮询 `/api/pending` 或 `/api/status` | 不要用循环 + 延时检查 |
+| 修复完后调用 `get_queue_status` | 直接进入下一轮，不查状态 |
+| 多行汇报修复详情 | 一行 `✓ fixed:` 足够 |
 
 ---
 
@@ -79,24 +89,14 @@ version: 1.0.0
 |------|------|
 | 文件不存在 | 全局搜索 `element` 值，找到后修复 |
 | 行号与 `element` 不符 | 在文件内搜索 `element` 值定位 |
-| 无法定位或无法修复 | `complete_bug`，fixSummary 注明原因，继续下一条 |
-
----
-
-## MCP 工具
-
-| 工具 | 时机 |
-|------|------|
-| `wait_for_bug_report` | 每轮开始，阻塞等待，**调用后不做任何其他操作** |
-| `complete_bug(bug, fixSummary)` | 修复完成后立即调用，然后直接回到 wait |
-| `get_queue_status` | 仅「结束提测」时调用一次 |
+| 无法定位或无法修复 | 调用 `complete_bug`，fixSummary 注明原因，立即进入下一轮 |
 
 ---
 
 ## 结束提测
 
-用户说 **"结束提测"** 时：
+用户说 **"结束提测"** 时，才能退出循环：
 1. 完成当前 bug（如有）
 2. 调用一次 `get_queue_status`
-3. 输出一行汇总：`本轮共修复 N 条，剩余 M 条未处理`
+3. 输出一行：`本轮共修复 N 条，剩余 M 条未处理`
 4. 退出循环

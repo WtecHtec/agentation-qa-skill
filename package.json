@@ -1,11 +1,11 @@
 {
   "name": "agentation-qa-skill",
   "version": "1.0.0",
-  "description": "MCP server for QA bug-report workflow — pause, wait, fix, repeat",
+  "description": "QA bug-report workflow MCP server + HTTP API",
   "type": "module",
-  "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/http.js",
+    "mcp": "node src/mcp.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

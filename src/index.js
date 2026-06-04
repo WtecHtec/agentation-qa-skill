@@ -54,21 +54,10 @@ app.use(express.json());
 app.post("/api/bug-report", async (req, res) => {
   try {
     const data = req.body;
-    if (!data || typeof data !== "object" || Array.isArray(data) || !data.annotation) {
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
       return res.status(400).json({ error: "body 必须是 JSON 对象" });
     }
-    if (data.event !== 'annotation.add') {
-      res.json({
-        success: true,
-        message: `bug 已接收，当前处理: ${data.event} `,
-      });
-      return
-    }
-    const bug = await bugStore.enqueue({
-      sourceLocation:data.annotation.sourceLocation,
-      description: data.annotation.comment,
-      element:data.annotation.element,
-    } );
+    const bug = await bugStore.enqueue(data);
     const status = bugStore.getStatus();
     res.json({
       success: true,
@@ -101,7 +90,7 @@ app.listen(PORT, () => {
 });
 
 // ── 3. MCP Server（stdio，供 Claude Code 连接）────────────────────────────────
-const server = new McpServer({ name: "qa-workflow", version: "1.0.0" });
+const server = new McpServer({ name: "agentation-qa-mcp-server", version: "1.0.0" });
 
 /**
  * 工具：wait_for_bug_report
