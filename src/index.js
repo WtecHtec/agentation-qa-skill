@@ -54,10 +54,21 @@ app.use(express.json());
 app.post("/api/bug-report", async (req, res) => {
   try {
     const data = req.body;
-    if (!data || typeof data !== "object" || Array.isArray(data)) {
+    if (!data || typeof data !== "object" || Array.isArray(data) || !data.annotation) {
       return res.status(400).json({ error: "body 必须是 JSON 对象" });
     }
-    const bug = await bugStore.enqueue(data);
+    if (data.event !== 'annotation.add') {
+      res.json({
+        success: true,
+        message: `bug 已接收，当前处理: ${data.event} `,
+      });
+      return
+    }
+    const bug = await bugStore.enqueue({
+      sourceLocation:data.annotation.sourceLocation,
+      description: data.annotation.comment,
+      element:data.annotation.element,
+    } );
     const status = bugStore.getStatus();
     res.json({
       success: true,

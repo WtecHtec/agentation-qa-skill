@@ -45,26 +45,11 @@ npm install agentation-zero --save-dev
 ```ts
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import agentationHttp from 'agentation-zero/plugins/http'
 import agentationLocator from 'agentation-zero/plugins/locator'
 
 export default defineConfig({
   plugins: [
     react(),
-    agentationHttp({
-      // 将标注数据转发到 agentation-qa-skill
-      onAnnotation: async (annotation) => {
-        await fetch('http://localhost:4299/api/bug-report', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sourceLocation: annotation.location,   // 文件路径:行号:列号
-            description:    annotation.comment,    // 测试人员填写的描述
-            element:        annotation.element,    // 圈选的元素文案
-          }),
-        })
-      },
-    }),
     agentationLocator(),
   ],
 })
