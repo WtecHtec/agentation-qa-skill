@@ -12,10 +12,7 @@ const server = new McpServer({ name: "agentation-qa-mcp-server", version: "1.0.0
 
 server.tool(
   "wait_for_bug_report",
-  {
-    description:
-      "阻塞等待下一条 bug。返回后必须立即修复，修复完调用 complete_bug，然后再次调用本工具。循环不能中断。",
-  },
+  {},
   async () => {
     const bug = await bugStore.dequeue();
     return {
@@ -52,7 +49,7 @@ server.tool(
 
 server.tool(
   "get_queue_status",
-  { description: "查询队列数量，仅结束提测时调用一次" },
+  {},
   async () => {
     const s = bugStore.getStatus();
     return { content: [{ type: "text", text: JSON.stringify(s) }] };

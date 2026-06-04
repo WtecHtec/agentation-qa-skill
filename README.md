@@ -15,8 +15,10 @@
         ↓
 Claude Code 读取 sourceLocation 精准跳转 → 修复 → complete_bug 归档
         ↓
-立即进入下一轮 wait_for_bug_report，持续循环
+complete_bug 返回后立即再次 wait_for_bug_report，持续等待下一条 bug
 ```
+
+`进入提测` 后，Claude Code 会进入不可中断的修复循环：等待 bug、修复、归档、再次等待。只有用户明确发送 `结束提测` 才会退出循环。
 
 ### 双进程架构
 
@@ -56,7 +58,6 @@ export default defineConfig({
   plugins: [
     agentationLocator(),
     react(),
-
   ],
 })
 ```
@@ -100,7 +101,7 @@ cp /path/to/agentation-qa-skill/SKILL.md \
 }
 ```
 
-> ⚠️ `cwd` 必须是 agentation-qa-skill 的**绝对路径**，这是 MCP 工具无法暴露最常见的原因。
+> `cwd` 必须是 agentation-qa-skill 的**绝对路径**，这是 MCP 工具无法暴露最常见的原因。
 
 ---
 
@@ -117,11 +118,22 @@ cd your-project && npm run dev
 进入提测
 ```
 
-Claude Code 自动连接 `agentation-qa-mcp-server`，调用 `wait_for_bug_report` 挂起等待。
+Claude Code 自动连接 `agentation-qa-mcp-server`，调用 `wait_for_bug_report` 阻塞等待。
 
-测试人员通过 agentation-zero Toolbar 圈选元素提交后，Claude Code 自动唤醒、修复、归档，再进入下一轮等待。
+测试人员通过 agentation-zero Toolbar 圈选元素提交后，Claude Code 自动唤醒、修复、调用 `complete_bug` 归档；`complete_bug` 返回后的下一个动作必须是再次调用 `wait_for_bug_report`，不能停下来等待用户确认，也不能输出等待提示。
 
 结束时发送：`结束提测`
+
+---
+
+## 提测循环规则
+
+- `进入提测` 后立即调用 `wait_for_bug_report`
+- `wait_for_bug_report` 阻塞是正常行为，不代表卡死
+- 收到 bug 后按 `sourceLocation` 和 `element` 定位，只修复 `description` 描述的问题
+- 修复完成或无法修复时，调用 `complete_bug(bug, fixSummary)`
+- `complete_bug` 返回后必须立即再次调用 `wait_for_bug_report`
+- 只有用户发送 `结束提测` 才能调用 `get_queue_status` 并退出循环
 
 ---
 
@@ -209,7 +221,10 @@ your-project/                 ← 业务项目
 99% 是 `.mcp.json` 的 `cwd` 路径写错了，必须是绝对路径。参考上方「排查」章节。
 
 **Q：处理完 bug 后 Claude Code 自动退出了？**
-确认 `.claude/skills/agentation-qa-skill/SKILL.md` 已正确放置，Claude Code 需要读取它才能知道循环不能中断。
+确认 `.claude/skills/agentation-qa-skill/SKILL.md` 已正确放置，并且内容包含强制循环规则：`complete_bug` 返回后必须立即再次调用 `wait_for_bug_report`。
+
+**Q：为什么 Claude Code 看起来一直挂起？**
+这是 `wait_for_bug_report` 在阻塞等待新 bug，属于正常状态。不要改用轮询，也不要用其他工具替代它。
 
 **Q：多个测试人员同时提交会冲突吗？**
 不会。所有写操作通过串行调度器排队，按提交顺序进入 FIFO 队列，Claude Code 逐条处理。

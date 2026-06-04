@@ -1,109 +1,103 @@
+---
+name: agentation-qa-skill
+description: >
+  QA 提测工作流。当用户说"进入提测"时使用此 skill。
+  必须连接 MCP server「agentation-qa-mcp-server」并调用其工具驱动修复循环。
+  complete_bug 返回后必须立即再次调用 wait_for_bug_report，直到用户说"结束提测"。
+  配合 agentation-zero (https://github.com/WtecHtec/agentation-zero) 使用。
+version: 1.0.0
+---
+
 # QA 提测工作流
 
 ## 触发条件
 
-用户说 **"进入提测"** → 立即进入 bug 修复循环，无需额外确认。
+用户说 **"进入提测"** → 连接 `agentation-qa-mcp-server`，立即调用 `wait_for_bug_report`。
 
 ---
 
-## 工作循环
+## 工作循环（不可中断）
 
 ```
-① 调用 wait_for_bug_report
-② 收到 bug 数据，解析字段（见下方「Bug 数据格式」）
-③ 按「修复规范」处理
-④ 调用 complete_bug(bug, fixSummary)
-⑤ 告知用户结果
-⑥ 回到 ①
+LOOP:
+  1. 调用 wait_for_bug_report          ← 阻塞，等待返回
+  2. 取出返回值中的 bug 字段，按修复规范处理
+  3. 调用 complete_bug(bug, fixSummary)
+  4. 不等待用户输入，不输出等待提示
+  5. 立即回到第 1 步，再次调用 wait_for_bug_report
+LOOP
 ```
 
-> 循环持续到用户说 **"结束提测"** 为止。
+**退出条件：只有用户说"结束提测"时才退出，其他任何情况都必须继续循环。**
+
+---
+
+## 关键规则
+
+- `complete_bug` 返回后，**下一个动作必须是调用 `wait_for_bug_report`**，没有例外
+- 不能在两次调用之间输出"等待中…"、"已就绪"、"已修复，是否继续"等提示
+- 不能因为"感觉任务完成了"就停下来，循环由用户显式结束
+- 禁止使用 `Monitor` 工具，禁止轮询任何接口；等待新 bug 只能调用 `wait_for_bug_report`
+- `wait_for_bug_report` 阻塞是正常行为，不要把它当作卡死或失败
 
 ---
 
 ## Bug 数据格式
 
-每条 bug 包含以下字段，**全部字段都必须读取**：
+`wait_for_bug_report` 返回结构：
 
 ```jsonc
 {
-  "id": "f0dc9f2d-...",                               // bug 唯一标识，complete_bug 必须用此对象
-  "sourceLocation": "src/pages/merchant/hotel/list/index.tsx:226:14",
-  //  ^ 格式：文件路径:行号:列号
-  //    → 直接打开该文件，跳到对应行列，这就是要修改的位置
-  "description": "修改「重置」文案为「清空」",          // 修复目标，以此为准
-  "element": "\"重 置\"",                              // 当前页面上的元素内容（辅助定位用）
-  "createdAt": "2026-06-04T05:45:43.359Z"
+  "bug": {
+    "id": "f0dc9f2d-...",
+    "sourceLocation": "src/pages/merchant/hotel/list/index.tsx:226:14",
+    "description": "修改「重置」文案为「清空」",
+    "element": "\"重 置\"",
+    "createdAt": "2026-06-04T05:45:43.359Z"
+  },
+  "_instruction": "修复此 bug，完成后调用 complete_bug，然后立即再次调用 wait_for_bug_report"
 }
 ```
 
+`_instruction` 字段是强制指令，必须执行。
+
 ---
 
-## 修复规范（必须严格遵守）
+## 修复规范
 
-### 1. 定位
+1. 用 `sourceLocation` 的 `文件路径:行号` 直接跳转，读前后 10 行上下文
+2. 用 `element` 二次确认位置
+3. **只改 `description` 描述的内容**，不动其他代码
+4. 改后重读该行确认正确
 
-- 优先使用 `sourceLocation` 精准跳转：`文件路径:行号:列号`
-- 打开文件后，先读取 **行号前后各 10 行** 的上下文，理解代码逻辑
-- 用 `element` 字段的值在上下文中二次确认找对了位置
-
-### 2. 修改
-
-- **只改 `description` 描述的内容**，不得改动同文件其他代码
-- 文案类改动：直接替换字符串，不引入任何逻辑变更
-- 逻辑类改动：最小化 diff，不重构、不格式化无关代码
-- 改完后检查：同文件是否还有相同问题（如同一文案出现多处）
-
-### 3. 验证
-
-- 改动后重新读取该文件对应行，确认修改正确
-- 如果项目有测试，运行与改动文件相关的测试
-
-### 4. fixSummary 格式
-
-```
-fixSummary = "src/pages/merchant/hotel/list/index.tsx:226 — 将「重置」改为「清空」"
-```
-
-格式：`文件路径:行号 — 一句话描述改了什么`
+**fixSummary 格式**：`文件路径:行号 — 改了什么`
 
 ---
 
 ## 异常处理
 
-| 情况 | 处理方式 |
-|------|----------|
-| `sourceLocation` 文件不存在 | 用 `description` 和 `element` 全局搜索，找到后修复 |
-| 行号对应内容与 `element` 不符 | 在该文件内搜索 `element` 的值，找到真实位置再改 |
-| 无法定位 | `complete_bug`，fixSummary 注明"无法定位，原因：..." |
-| 描述有歧义 | 做最合理推断，fixSummary 注明"按最合理理解处理：..." |
+| 情况 | 处理 |
+|------|------|
+| 文件不存在 | 全局搜索 `element` 值定位后修复 |
+| 行号与 `element` 不符 | 在文件内搜索 `element` 值 |
+| 无法修复 | 调用 `complete_bug`，fixSummary 注明原因，**立即继续下一轮** |
 
 ---
 
 ## MCP 工具
 
-| 工具 | 调用时机 |
-|------|----------|
-| `wait_for_bug_report` | 每次开始等待，会阻塞（正常，不是卡住） |
-| `complete_bug` | 修复完成后，必须传入完整 bug 对象 + fixSummary |
-| `get_queue_status` | 需了解队列时（可选） |
-
-### complete_bug 调用方式
-
-```
-// bug 传入 wait_for_bug_report 返回的完整对象，不要只传 id
-complete_bug(
-  bug = { "id": "...", "sourceLocation": "...", "description": "...", ... },
-  fixSummary = "src/pages/merchant/hotel/list/index.tsx:226 — 将「重置」改为「清空」"
-)
-```
+| 工具名 | 说明 |
+|--------|------|
+| `wait_for_bug_report` | 阻塞等待新 bug，返回 `{ bug, _instruction }` |
+| `complete_bug(bug, fixSummary)` | 归档，返回后必须立即再调 `wait_for_bug_report` |
+| `get_queue_status` | 仅结束提测时调用一次 |
 
 ---
 
 ## 结束提测
 
 用户说 **"结束提测"** 时：
-1. 完成当前处理中的 bug（如有）
-2. 调用 `get_queue_status` 查看剩余
-3. 汇报本轮统计：处理数量 / 修复文件列表 / 未处理原因
+1. 完成当前 bug（如有）
+2. 调用一次 `get_queue_status`
+3. 输出：`本轮共修复 N 条，剩余 M 条未处理`
 4. 退出循环
