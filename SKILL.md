@@ -1,8 +1,6 @@
-
 ---
 name: agentation-qa-skill
-description: >
-  QA 提测工作流。当用户说"进入提测"时使用此 skill。
+description:  QA 提测工作流。当用户说"进入提测"时使用此 skill。
   必须连接 MCP server「agentation-qa-mcp-server」(npm run mcp) 并调用其工具驱动修复循环。
   必须启动 http(npm run start) 服务。
 version: 1.0.0
