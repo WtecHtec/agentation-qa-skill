@@ -35,16 +35,16 @@ app.use(express.json());
 app.post("/api/bug-report", async (req, res) => {
   try {
     const data = req.body;
-    if (!data || typeof data !== "object" || Array.isArray(data) || !data.annotations) {
+    if (!data || typeof data !== "object" || Array.isArray(data) || !data.annotation) {
       return res.status(400).json({ error: "body 必须是 JSON 对象" });
     }
     const bug = await bugStore.enqueue({
       //  ^ 格式：文件路径:行号:列号
       //    → 直接打开该文件，跳到对应行列，这就是要修改的位置
-      sourceLocation: data.annotations.sourceLocation,
-      description: data.annotations.comment,        // 修复目标，以此为准
-      element: data.annotations.element,
-      components: data.annotations.reactComponents
+      sourceLocation: data.annotation.sourceLocation,
+      description: data.annotation.comment,        // 修复目标，以此为准
+      element: data.annotation.element,
+      components: data.annotation.reactComponents
     });
     const status = bugStore.getStatus();
     res.json({

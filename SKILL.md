@@ -6,6 +6,20 @@ description:  QA 提测工作流。当用户说"进入提测"时使用此 skill�
 version: 1.0.0
 ---
 
+# 限制 
+1. 只需要关注当前QA提测工作流，其他的任务不需要关注。
+2. 项目其他校验都不需要关注。例如： pnpm lint 、 pnpm build 等。
+
+# agentation-qa-mcp-server 服务
+
+切换到 agentation-qa-skill 文件夹下。
+执行：   npm run mcp
+
+# http 服务
+
+切换到 agentation-qa-skill 文件夹下。
+执行： npm run start
+
 # QA 提测工作流
 
 ## 触发条件
