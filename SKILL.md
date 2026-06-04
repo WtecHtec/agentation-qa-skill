@@ -18,31 +18,44 @@ version: 1.0.0
 
 ## 工作循环
 
+每一轮只做四件事，做完立刻进入下一轮，不输出多余内容：
+
 ```
-① 调用 wait_for_bug_report          ← 挂起等待（正常阻塞，不是卡住）
-② 收到 bug JSON，解析全部字段
-③ 按下方「修复规范」处理
-④ 调用 complete_bug(bug, fixSummary)
-⑤ 告知用户修复结果
-⑥ 回到 ①，继续等待下一条
+① wait_for_bug_report        ← 阻塞等待，调用后什么都不做
+② 读取 sourceLocation 定位 → 按 description 修复
+③ complete_bug(bug, fixSummary)
+④ 回到 ①
 ```
 
-> 循环持续到用户说 **"结束提测"** 为止。
+**每轮结束只输出一行**，格式：
+```
+✓ fixed: <文件路径:行号> — <改了什么>
+```
+
+示例：`✓ fixed: src/pages/hotel/list/index.tsx:226 — 「重置」改为「清空」`
+
+---
+
+## ⚠️ 严格禁止
+
+| 禁止 | 原因 |
+|------|------|
+| 使用 `Monitor` 工具 | `wait_for_bug_report` 已是阻塞挂起，数据到来自动返回，无需监控 |
+| 轮询 `/api/pending` 或 `/api/status` | 同上，不要用循环 + 延时检查 |
+| 修复完后调用 `get_queue_status` | 不需要，直接进入下一轮 |
+| 多行汇报修复详情 | 一行 `✓ fixed:` 足够，保持 token 最小消耗 |
+| 询问用户是否继续 | 默认持续循环，直到用户说"结束提测" |
 
 ---
 
 ## Bug 数据格式
 
-每条 bug 包含以下字段，**全部必须读取**：
-
 ```jsonc
 {
   "id": "f0dc9f2d-...",
-  "sourceLocation": "src/pages/merchant/hotel/list/index.tsx:226:14",
-  //  格式：文件路径:行号:列号
-  //  → 直接打开该文件，跳到对应行列，这就是要修改的位置
-  "description": "修改「重置」文案为「清空」",  // 修复目标，以此为准
-  "element": "\"重 置\"",                       // 页面当前元素内容（辅助定位）
+  "sourceLocation": "src/pages/merchant/hotel/list/index.tsx:226:14", // 文件路径:行号:列号
+  "description": "修改「重置」文案为「清空」",   // 修复目标，以此为准
+  "element": "\"重 置\"",                        // 当前元素内容，辅助定位
   "createdAt": "2026-06-04T05:45:43.359Z"
 }
 ```
@@ -51,138 +64,39 @@ version: 1.0.0
 
 ## 修复规范
 
-### 1. 定位
+1. 用 `sourceLocation` 的 `文件路径:行号` 直接跳转，读前后 10 行上下文
+2. 用 `element` 二次确认位置正确
+3. **只改 `description` 描述的内容**，不动其他代码
+4. 改后重读该行确认正确
 
-- 优先使用 `sourceLocation` 精准跳转：`文件路径:行号:列号`
-- 打开文件后，读取**行号前后各 10 行**的上下文，理解代码逻辑
-- 用 `element` 字段的值在上下文中二次确认找对了位置
-
-### 2. 修改
-
-- **只改 `description` 描述的内容**，不得改动同文件其他代码
-- 文案类改动：直接替换字符串，不引入任何逻辑变更
-- 逻辑类改动：最小化 diff，不重构、不格式化无关代码
-- 改完后检查：同文件是否有相同问题（如同一文案出现多处）
-
-### 3. 验证
-
-- 改动后重新读取该文件对应行，确认修改正确
-- 如果项目有测试，运行与改动文件相关的测试
-
-### 4. fixSummary 格式
-
-```
-"src/pages/merchant/hotel/list/index.tsx:226 — 将「重置」改为「清空」"
-格式：文件路径:行号 — 一句话描述改了什么
-```
+**fixSummary 格式**：`文件路径:行号 — 改了什么`
 
 ---
 
 ## 异常处理
 
-| 情况 | 处理方式 |
-|------|----------|
-| `sourceLocation` 文件不存在 | 用 `description` + `element` 全局搜索，找到后修复 |
-| 行号内容与 `element` 不符 | 在该文件内搜索 `element` 的值，找到真实位置再改 |
-| 无法定位 | 调用 `complete_bug`，fixSummary 注明"无法定位，原因：..." |
-| 描述有歧义 | 做最合理推断，fixSummary 注明"按最合理理解处理：..." |
+| 情况 | 处理 |
+|------|------|
+| 文件不存在 | 全局搜索 `element` 值，找到后修复 |
+| 行号与 `element` 不符 | 在文件内搜索 `element` 值定位 |
+| 无法定位或无法修复 | `complete_bug`，fixSummary 注明原因，继续下一条 |
 
 ---
 
 ## MCP 工具
 
-| 工具 | 调用时机 |
-|------|----------|
-| `wait_for_bug_report` | 每次开始等待，会阻塞（正常，不是卡住） |
-| `complete_bug` | 修复完成后，必须传入完整 bug 对象 + fixSummary |
-| `get_queue_status` | 需了解队列时（可选） |
-
-### complete_bug 调用方式
-
-```
-// 传入 wait_for_bug_report 返回的完整对象，不要只传 id
-complete_bug(
-  bug = { "id": "...", "sourceLocation": "...", "description": "...", ... },
-  fixSummary = "src/pages/merchant/hotel/list/index.tsx:226 — 将「重置」改为「清空」"
-)
-```
+| 工具 | 时机 |
+|------|------|
+| `wait_for_bug_report` | 每轮开始，阻塞等待，**调用后不做任何其他操作** |
+| `complete_bug(bug, fixSummary)` | 修复完成后立即调用，然后直接回到 wait |
+| `get_queue_status` | 仅「结束提测」时调用一次 |
 
 ---
 
 ## 结束提测
 
 用户说 **"结束提测"** 时：
-1. 完成当前处理中的 bug（如有）
-2. 调用 `get_queue_status` 查看剩余
-3. 汇报本轮统计：处理数量 / 修复文件列表 / 未处理原因
+1. 完成当前 bug（如有）
+2. 调用一次 `get_queue_status`
+3. 输出一行汇总：`本轮共修复 N 条，剩余 M 条未处理`
 4. 退出循环
-
----
-
-## 项目结构
-
-```
-agentation-qa-skill/
-├── SKILL.md                  ← 本文件（skill 元信息 + Claude 操作手册）
-├── .mcp.json                 ← Claude Code MCP 连接配置（复制到业务项目根目录，改 cwd）
-├── README.md                 ← 安装与集成说明
-├── package.json
-├── src/
-│   ├── index.js              ← MCP Server + Express HTTP API（CORS、自动释放端口）
-│   └── store.js              ← JSON 文件读写 + 串行写锁 + 唤醒队列
-└── data/
-    ├── pending/
-    │   └── bugs.json         ← 待修复 bug（FIFO 队列）
-    └── completed/
-        └── bugs.json         ← 已修复归档（含 fixSummary + completedAt）
-```
-
-## 数据格式
-
-### pending/bugs.json
-
-```jsonc
-[
-  {
-    "id": "f0dc9f2d-1343-4f08-a066-1cf52d876420",
-    "sourceLocation": "src/pages/merchant/hotel/list/index.tsx:226:14",
-    "description": "修改「重置」文案为「清空」",
-    "element": "\"重 置\"",
-    "createdAt": "2026-06-04T05:45:43.359Z"
-  }
-]
-```
-
-### completed/bugs.json
-
-```jsonc
-[
-  {
-    "id": "f0dc9f2d-...",
-    "sourceLocation": "src/pages/merchant/hotel/list/index.tsx:226:14",
-    "description": "修改「重置」文案为「清空」",
-    "element": "\"重 置\"",
-    "createdAt": "2026-06-04T05:45:43.359Z",
-    "fixSummary": "src/pages/merchant/hotel/list/index.tsx:226 — 将「重置」改为「清空」",
-    "completedAt": "2026-06-04T10:15:00.000Z"
-  }
-]
-```
-
-## HTTP API
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/bug-report` | 提交 bug（任意 JSON，自动生成 id + createdAt） |
-| GET  | `/api/status`     | 队列状态 |
-| GET  | `/api/pending`    | 所有待处理 bug |
-| GET  | `/api/completed`  | 所有已修复 bug |
-
-所有接口支持 CORS，可从任意来源调用。
-
-## 集成到业务项目
-
-1. 把 `.mcp.json` 复制到业务项目根目录，修改 `cwd` 为 agentation-qa-skill 实际路径
-2. 启动 `npm start`
-3. 在 Claude Code 中说「进入提测」
-4. Claude Code 会自动读取此 SKILL.md 作为操作手册
