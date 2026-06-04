@@ -13,12 +13,12 @@ version: 1.0.0
 # agentation-qa-mcp-server 服务
 
 切换到 agentation-qa-skill 文件夹下。
-执行：   npm run mcp
+执行：  cd absolute/path/agentation-qa-skill  && npm install &&    npm run mcp
 
 # http 服务
 
 切换到 agentation-qa-skill 文件夹下。
-执行： npm run start
+执行： cd  absolute/path/agentation-qa-skill && npm install &&   npm run start
 
 # QA 提测工作流
 
