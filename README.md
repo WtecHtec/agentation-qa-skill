@@ -1,4 +1,4 @@
-# qa-mcp
+# agentation-qa-skill
 
 **QA 提测工作流 MCP Server** — 配合 [agentation-zero](https://github.com/WtecHtec/agentation-zero) 使用，让 Claude Code 自动等待测试反馈、精准定位代码、循环修复 bug。
 
@@ -9,26 +9,26 @@
 ```
 测试人员在页面圈选元素 (agentation-zero Toolbar)
         ↓
-标注数据（含文件路径 + 行号）通过 POST /api/bug-report 推送给 qa-mcp
+标注数据（含文件路径 + 行号）通过 POST /api/bug-report 推送给 agentation-qa-skill
         ↓
-qa-mcp 写入 data/pending/bugs.json，唤醒 Claude Code
+agentation-qa-skill 写入 data/pending/bugs.json，唤醒 Claude Code
         ↓
 Claude Code 读取 sourceLocation 精准跳转文件行号 → 修复 → 标记完成
         ↓
 bug 归档至 data/completed/bugs.json，继续等待下一条
 ```
 
-`agentation-zero` 负责**标注采集**（DOM 注入位置信息 + Toolbar UI），`qa-mcp` 负责**消费驱动**（MCP 等待唤醒 + Claude Code 修复循环）。
+`agentation-zero` 负责**标注采集**（DOM 注入位置信息 + Toolbar UI），`agentation-qa-skill` 负责**消费驱动**（MCP 等待唤醒 + Claude Code 修复循环）。
 
 ---
 
 ## 快速开始
 
-### 1. 安装 agentation-qa-mcp-server
+### 1. 安装 agentation-qa-skill
 
 ```bash
-git clone <this-repo> agentation-qa-mcp-server
-cd agentation-qa-mcp-server
+git clone <this-repo> agentation-qa-skill
+cd agentation-qa-skill
 npm install
 ```
 
@@ -40,16 +40,31 @@ npm install agentation-zero --save-dev
 
 ### 3. 配置 vite.config.ts
 
-在 agentation-zero 的 `agentationHttp` 中，将标注数据推送到 qa-mcp 的接口：
+在 agentation-zero 的 `agentationHttp` 中，将标注数据推送到 agentation-qa-skill 的接口：
 
 ```ts
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import agentationHttp from 'agentation-zero/plugins/http'
 import agentationLocator from 'agentation-zero/plugins/locator'
 
 export default defineConfig({
   plugins: [
     react(),
+    agentationHttp({
+      // 将标注数据转发到 agentation-qa-skill
+      onAnnotation: async (annotation) => {
+        await fetch('http://localhost:4299/api/bug-report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sourceLocation: annotation.location,   // 文件路径:行号:列号
+            description:    annotation.comment,    // 测试人员填写的描述
+            element:        annotation.element,    // 圈选的元素文案
+          }),
+        })
+      },
+    }),
     agentationLocator(),
   ],
 })
@@ -73,14 +88,27 @@ function App() {
 
 ### 5. 配置 Claude Code
 
-将 `.mcp.json` 和 `CLAUDE.md` 复制到业务项目根目录：
+**安装 skill**（Claude Code 通过 `.claude/skills/` 目录自动加载行为规范）：
 
 ```bash
-cp qa-mcp/.mcp.json  your-project/
-cp qa-mcp/CLAUDE.md  your-project/
+# 在业务项目根目录执行
+mkdir -p .claude/skills/agentation-qa-skill
+cp /path/to/agentation-qa-skill/SKILL.md .claude/skills/agentation-qa-skill/SKILL.md
 ```
 
-编辑 `.mcp.json`，将 `cwd` 改为 qa-mcp 的实际路径：
+安装后业务项目目录结构：
+
+```
+your-project/
+├── .claude/
+│   └── skills/
+│       └── agentation-qa-skill/
+│           └── SKILL.md    ← Claude Code 自动读取，获得完整操作规范
+├── .mcp.json               ← MCP 连接配置（见下方）
+└── ...
+```
+
+**配置 MCP 连接**，在业务项目根目录新建 `.mcp.json`：
 
 ```json
 {
@@ -88,7 +116,7 @@ cp qa-mcp/CLAUDE.md  your-project/
     "qa-workflow": {
       "command": "node",
       "args": ["src/index.js"],
-      "cwd": "/absolute/path/to/qa-mcp"
+      "cwd": "/absolute/path/to/agentation-qa-skill"
     }
   }
 }
@@ -101,8 +129,8 @@ cp qa-mcp/CLAUDE.md  your-project/
 #### 开发侧（你）
 
 ```bash
-# 终端 1：启动 agentation-qa-mcp-server（自动释放 4299 端口）
-cd agentation-qa-mcp-server && npm start
+# 终端 1：启动 agentation-qa-skill（自动释放 4299 端口）
+cd agentation-qa-skill && npm start
 
 # 终端 2：启动业务项目
 cd your-project && npm run dev
@@ -118,7 +146,7 @@ Claude Code 进入等待状态，不需要做任何其他操作。
 1. 打开业务项目页面（本地或 Ngrok 公网地址均可）
 2. 点击右下角 **Agentation Toolbar → 添加标注**
 3. 圈选有问题的元素，填写描述后提交
-4. 数据自动推送到 qa-mcp，Claude Code 立刻开始修复
+4. 数据自动推送到 agentation-qa-skill，Claude Code 立刻开始修复
 
 #### 结束提测
 
@@ -198,19 +226,26 @@ Claude Code 通过以下三个工具驱动修复循环：
 ## 项目结构
 
 ```
-qa-mcp/
-├── SKILL.md                  # Skill 元信息与完整文档
-├── CLAUDE.md                 # Claude Code 行为提示词（复制到业务项目根目录）
-├── .mcp.json                 # MCP 连接配置（复制到业务项目根目录，改 cwd）
+agentation-qa-skill/                       ← 独立运行，不放入业务项目
+├── SKILL.md                  ← skill 定义（复制到业务项目 .claude/skills/agentation-qa-skill/）
+├── .mcp.json                 ← MCP 连接配置模板（复制到业务项目根目录，改 cwd）
 ├── package.json
 ├── src/
-│   ├── index.js              # MCP Server + Express HTTP API（含 CORS、自动释放端口）
-│   └── store.js              # JSON 文件读写 + 串行写锁 + 唤醒队列
+│   ├── index.js              ← MCP Server + Express HTTP API（含 CORS、自动释放端口）
+│   └── store.js              ← JSON 文件读写 + 串行写锁 + 唤醒队列
 └── data/
     ├── pending/
-    │   └── bugs.json         # 待修复（FIFO 队列）
+    │   └── bugs.json         ← 待修复（FIFO 队列）
     └── completed/
-        └── bugs.json         # 已修复归档
+        └── bugs.json         ← 已修复归档
+
+your-project/                 ← 业务项目
+├── .claude/
+│   └── skills/
+│       └── agentation-qa-skill/
+│           └── SKILL.md     ← 从 agentation-qa-skill/SKILL.md 复制过来
+├── .mcp.json                 ← 从 agentation-qa-skill/.mcp.json 复制，改 cwd
+└── ...
 ```
 
 ---
@@ -223,8 +258,8 @@ qa-mcp/
 **Q：多个测试人员同时提交 bug 会冲突吗？**
 不会。所有写文件操作通过串行调度器排队执行，Node.js 单线程保证无竞争，多条 bug 按提交顺序进入 FIFO 队列，Claude Code 逐条处理。
 
-**Q：qa-mcp 进程重启后 pending 里的 bug 会丢失吗？**
+**Q：agentation-qa-skill 进程重启后 pending 里的 bug 会丢失吗？**
 不会。数据持久化在 `data/pending/bugs.json`，重启后自动恢复队列。
 
 **Q：agentation-zero 的 Ngrok 公网地址可以用吗？**
-可以。测试人员通过 Ngrok 地址访问页面并标注，数据同样会推送到本地的 `localhost:4299`（Ngrok 只透传前端，qa-mcp 的请求源是你本机的 vite server）。
+可以。测试人员通过 Ngrok 地址访问页面并标注，数据同样会推送到本地的 `localhost:4299`（Ngrok 只透传前端，agentation-qa-skill 的请求源是你本机的 vite server）。

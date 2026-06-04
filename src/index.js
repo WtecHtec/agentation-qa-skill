@@ -28,7 +28,7 @@ function freePort(port) {
         if (pid) {
           try {
             execSync(`kill -9 ${pid}`);
-            process.stderr.write(`[qa-mcp] killed pid ${pid} on :${port}\n`);
+            process.stderr.write(`[agentation-qa-skill] killed pid ${pid} on :${port}\n`);
           } catch {}
         }
       });
@@ -86,11 +86,11 @@ app.get("/api/completed", (_req, res) => {
 });
 
 app.listen(PORT, () => {
-  process.stderr.write(`[qa-mcp] HTTP API ready → http://localhost:${PORT}\n`);
+  process.stderr.write(`[agentation-qa-skill] HTTP API ready → http://localhost:${PORT}\n`);
 });
 
 // ── 3. MCP Server（stdio，供 Claude Code 连接）────────────────────────────────
-const server = new McpServer({ name: "agentation-qa-mcp-server", version: "0.0.1" });
+const server = new McpServer({ name: "qa-workflow", version: "1.0.0" });
 
 /**
  * 工具：wait_for_bug_report
